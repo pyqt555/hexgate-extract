@@ -1,0 +1,588 @@
+import { Button, ScrollView, LineEdit } from "std-widgets.slint";
+
+export struct SlintManifestItem {
+    id: string,
+    version_short: string,
+    version_full: string,
+    realms: string,
+    realms_full: string,
+    platforms: string,
+    date_str: string,
+    size_str: string,
+    is_cached: bool,
+}
+
+export struct SlintFilterPill {
+    name: string,
+    selected: bool,
+}
+
+export struct SlintExplorerRow {
+    id: string,
+    name: string,
+    is_dir: bool,
+    depth: int,
+    is_expanded: bool,
+    is_selected: bool,
+    size_str: string,
+}
+
+// Rounded filter pill component
+component FilterPill inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 22px;
+    background: selected ? #0ea5e9 : (ta.has-hover ? #2e3440 : #1a1c23);
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: selected ? #38bdf8 : #3b4252;
+
+    animate background { duration: 100ms; }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.text;
+            font-size: 11px;
+            font-weight: root.selected ? 700 : 400;
+            color: root.selected ? #ffffff : #d8dee9;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// Custom Checkbox widget (Warning-free, theme-matched)
+component CustomCheckBox inherits Rectangle {
+    in-out property <bool> checked: false;
+    callback toggled(bool);
+
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    border-width: 1px;
+    border-color: checked ? #38bdf8 : #4c566a;
+    background: checked ? #0ea5e9 : transparent;
+
+    ta := TouchArea {
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+
+    if checked : Text {
+        text: "✓";
+        font-size: 10px;
+        color: #ffffff;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// Custom Physical Tactile Button
+component TactileButton inherits Rectangle {
+    in-out property <string> text;
+    in property <bool> primary: false;
+    callback clicked();
+
+    background: primary ? (ta.pressed ? #0284c7 : (ta.has-hover ? #38bdf8 : #0ea5e9))
+                        : (ta.pressed ? #22252a : (ta.has-hover ? #2e3440 : #1a1c23));
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: primary ? #0284c7 : #3b4252;
+    height: 36px;
+
+    animate background { duration: 120ms; }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.text;
+        font-size: 13px;
+        font-weight: 600;
+        color: root.primary ? #ffffff : #d8dee9;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+
+        y: parent.height / 2 - self.height / 2 + (ta.pressed ? 1.5px : 0px);
+    }
+}
+
+// The Main App Window Shell
+export component AppWindow inherits Window {
+    title: "Hexgate Manifest Explorer";
+    min-width: 950px;
+    min-height: 600px;
+    background: #0d0f12;
+
+    // Navigation state: "selection" or "explorer"
+    in property <string> current_screen: "selection";
+
+    // -------------------------------------------------------------
+    // PROPERTIES FOR SCREEN 1 (Manifest Selection Catalog)
+    // -------------------------------------------------------------
+    in property <[string]> games_list: ["lol", "valorant", "ares", "ks-foundation", "lion", "bacon"];
+    in property <string> active_game: "lol";
+    in property <[SlintManifestItem]> manifest_items: [];
+    in property <string> active_manifest_id: "";
+    in property <SlintManifestItem> selected_manifest;
+    in property <bool> has_selection: false;
+
+    in property <[SlintFilterPill]> platform_pills: [];
+    in property <[SlintFilterPill]> realm_pills: [];
+    in property <[SlintFilterPill]> artifact_pills: [];
+    in property <bool> show_artifact_pills: false;
+    in property <bool> is_syncing_catalog: false;
+
+    callback game_selected(string);
+    callback manifest_row_clicked(string);
+    callback manifest_row_double_clicked(string);
+    callback sync_catalog();
+    callback search_changed(string);
+    callback platform_pill_clicked(string);
+    callback realm_pill_clicked(string);
+    callback artifact_pill_clicked(string);
+
+    // -------------------------------------------------------------
+    // PROPERTIES FOR SCREEN 2 (Asset Explorer & Extraction)
+    // -------------------------------------------------------------
+    in property <[SlintExplorerRow]> explorer_rows: [];
+    in property <[SlintFilterPill]> language_pills: [];
+    in property <bool> is_regex_active: false;
+
+    // Live Extraction Progress (fed by tracing subscriber)
+    in property <float> extract_percent: 0.0;
+    in property <string> extract_speed: "0.0 MB/s";
+    in property <string> extract_eta: "--:--";
+    in property <string> extract_status: "Waiting...";
+    in property <bool> is_extracting: false;
+
+    callback back_to_selection();
+    callback explorer_search_changed(string);
+    callback toggle_regex_search();
+    callback language_pill_clicked(string);
+    callback toggle_folder_expansion(string);
+    callback toggle_row_selection(string, bool);
+    callback toggle_select_all(bool);
+    callback extract_selected();
+
+    VerticalLayout {
+        // Dynamic view switcher
+        if root.current_screen == "selection" : HorizontalLayout {
+            padding: 10px;
+            spacing: 12px;
+
+            // ZONE A: THE GAMES SIDEBAR (Left)
+            Rectangle {
+                width: 180px;
+                background: #13161c;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: #1e222b;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "catalog";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #4c566a;
+                    }
+
+                    for game_key in root.games_list : Rectangle {
+                        height: 32px;
+                        border-radius: 4px;
+                        background: (game_key == root.active_game) ? #1e222b : (sidebar-ta.has-hover ? #171a21 : transparent);
+
+                        sidebar-ta := TouchArea {
+                            clicked => { root.game_selected(game_key); }
+                        }
+
+                        Text {
+                            text: game_key;
+                            font-size: 13px;
+                            font-weight: (game_key == root.active_game) ? 600 : 400;
+                            color: (game_key == root.active_game) ? #38bdf8 : #d8dee9;
+                            x: 10px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle { background: transparent; }
+
+                    TactileButton {
+                        text: root.is_syncing_catalog ? "Syncing..." : "Sync Catalog";
+                        clicked => { if (!root.is_syncing_catalog) { root.sync_catalog(); } }
+                    }
+                }
+            }
+
+            // ZONE B & C: CONTENT GRID (Center/Right)
+            VerticalLayout {
+                spacing: 12px;
+
+                VerticalLayout {
+                    spacing: 8px;
+                    search-box := LineEdit {
+                        placeholder-text: "Search by version or manifest id...";
+                        height: 36px;
+                        edited(text) => { root.search_changed(text); }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: "platforms:"; color: #4c566a; font-size: 11px; font-weight: 700; width: 75px; vertical-alignment: center; }
+                        ScrollView {
+                            viewport-width: platform_layout.min-width;
+                            height: 28px;
+                            platform_layout := HorizontalLayout {
+                                spacing: 6px; padding-top: 2px; padding-bottom: 2px;
+                                for pill in root.platform_pills : FilterPill {
+                                    text: pill.name; selected: pill.selected;
+                                    clicked => { root.platform_pill_clicked(pill.name); }
+                                }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: "realms:"; color: #4c566a; font-size: 11px; font-weight: 700; width: 75px; vertical-alignment: center; }
+                        ScrollView {
+                            viewport-width: realm_layout.min-width;
+                            height: 28px;
+                            realm_layout := HorizontalLayout {
+                                spacing: 6px; padding-top: 2px; padding-bottom: 2px;
+                                for pill in root.realm_pills : FilterPill {
+                                    text: pill.name; selected: pill.selected;
+                                    clicked => { root.realm_pill_clicked(pill.name); }
+                                }
+                            }
+                        }
+                    }
+                    if root.show_artifact_pills : HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: "artifacts:"; color: #4c566a; font-size: 11px; font-weight: 700; width: 75px; vertical-alignment: center; }
+                        ScrollView {
+                            viewport-width: artifact_layout.min-width;
+                            height: 28px;
+                            artifact_layout := HorizontalLayout {
+                                spacing: 6px; padding-top: 2px; padding-bottom: 2px;
+                                for pill in root.artifact_pills : FilterPill {
+                                    text: pill.name; selected: pill.selected;
+                                    clicked => { root.artifact_pill_clicked(pill.name); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    // ZONE B: The Manifest Selection Table (Middle)
+                    Rectangle {
+                        background: #13161c;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: #1e222b;
+
+                        VerticalLayout {
+                            padding: 8px;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px; height: 24px;
+                                Text { text: "version"; color: #4c566a; font-size: 11px; font-weight: 700; width: 25%; }
+                                Text { text: "realms"; color: #4c566a; font-size: 11px; font-weight: 700; width: 45%; }
+                                Text { text: "date"; color: #4c566a; font-size: 11px; font-weight: 700; width: 15%; }
+                                Text { text: "size"; color: #4c566a; font-size: 11px; font-weight: 700; width: 15%; }
+                            }
+                            ScrollView {
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    for item in root.manifest_items : Rectangle {
+                                        height: 40px; border-radius: 4px;
+                                        background: (item.id == root.active_manifest_id) ? #1e222b : (row-ta.has-hover ? #171a21 : transparent);
+                                        row-ta := TouchArea {
+                                            clicked => { root.manifest_row_clicked(item.id); }
+                                            double-clicked => { root.manifest_row_double_clicked(item.id); }
+                                        }
+                                        HorizontalLayout {
+                                            padding-left: 10px; padding-right: 10px;
+                                            version-container := Rectangle {
+                                                width: 25%;
+                                                version-text := Text {
+                                                    text: item.version_short; font-size: 13px;
+                                                    color: (item.id == root.active_manifest_id) ? #ffffff : #d8dee9;
+                                                    vertical-alignment: center; x: 0px; width: parent.width; height: parent.height;
+                                                }
+                                                if item.version_short != item.version_full && version-hover.has-hover : Rectangle {
+                                                    background: #1e222a; border-width: 1px; border-color: #3b4252; border-radius: 4px;
+                                                    x: 0px; y: 22px; z: 100;
+                                                    VerticalLayout {
+                                                        padding: 6px;
+                                                        Text { text: item.version_full; font-size: 12px; color: #eceff4; }
+                                                    }
+                                                }
+                                                version-hover := TouchArea { width: parent.width; height: parent.height; }
+                                            }
+                                            realms-container := Rectangle {
+                                                width: 45%;
+                                                realms-text := Text {
+                                                    text: item.realms; font-size: 12px; color: #81a1c1;
+                                                    vertical-alignment: center; x: 0px; width: parent.width; height: parent.height;
+                                                }
+                                                if item.realms != item.realms_full && realms-hover.has-hover : Rectangle {
+                                                    background: #1e222a; border-width: 1px; border-color: #3b4252; border-radius: 4px;
+                                                    x: 0px; y: 22px; z: 100;
+                                                    VerticalLayout {
+                                                        padding: 6px;
+                                                        Text { text: item.realms_full; font-size: 12px; color: #eceff4; }
+                                                    }
+                                                }
+                                                realms-hover := TouchArea { width: parent.width; height: parent.height; }
+                                            }
+                                            Text { text: item.date_str; font-size: 12px; color: #4c566a; vertical-alignment: center; width: 15%; }
+                                            Text { text: item.size_str; font-size: 12px; color: #d8dee9; vertical-alignment: center; width: 15%; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ZONE C: Selected Manifest Detail Panel (Right)
+                    if root.has_selection : Rectangle {
+                        width: 260px;
+                        background: #13161c;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: #1e222b;
+
+                        VerticalLayout {
+                            padding: 16px; spacing: 12px;
+                            Text { text: "preview"; font-size: 11px; font-weight: 700; color: #4c566a; }
+                            VerticalLayout {
+                                spacing: 15px;
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: "manifest id"; font-size: 11px; color: #4c566a; }
+                                    Text { text: root.selected_manifest.id; font-size: 12px; color: #d8dee9; font-family: "monospace"; }
+                                }
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: "platforms"; font-size: 11px; color: #4c566a; }
+                                    Text { text: root.selected_manifest.platforms; font-size: 12px; color: #88c0d0; }
+                                }
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: "realms"; font-size: 11px; color: #4c566a; }
+                                    Text { text: root.selected_manifest.realms; font-size: 12px; color: #81a1c1; }
+                                }
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: "file size"; font-size: 11px; color: #4c566a; }
+                                    Text { text: root.selected_manifest.size_str; font-size: 13px; color: #eceff4; font-weight: 600; }
+                                }
+                            }
+                            Rectangle { background: transparent; }
+                            TactileButton {
+                                text: "Explore Manifest"; primary: true;
+                                clicked => { root.manifest_row_double_clicked(root.selected_manifest.id); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // =============================================================
+        // SCREEN 2: THE ASSET EXPLORER & EXTRACTION VIEW (Obsidian Vibe)
+        // =============================================================
+        if root.current_screen == "explorer" : VerticalLayout {
+            padding: 12px;
+            spacing: 12px;
+
+            // Header Back Button & Control Options
+            HorizontalLayout {
+                spacing: 10px;
+                TactileButton {
+                    text: "◀ Back to Catalog"; width: 140px;
+                    clicked => { root.back_to_selection(); }
+                }
+
+                // Search Input with standard/regex toggle button
+                HorizontalLayout {
+                    spacing: 6px;
+                    search-box-exp := LineEdit {
+                        placeholder-text: root.is_regex_active ? "Search files with regex..." : "Search files by name...";
+                        edited(text) => { root.explorer_search_changed(text); }
+                    }
+                    TactileButton {
+                        text: ".*"; width: 36px; primary: root.is_regex_active;
+                        clicked => { root.toggle_regex_search(); }
+                    }
+                }
+            }
+
+            // Language Tag Filters Pill Row (Locale filtering)
+            HorizontalLayout {
+                spacing: 12px;
+                Text { text: "locales:"; color: #4c566a; font-size: 11px; font-weight: 700; width: 75px; vertical-alignment: center; }
+                ScrollView {
+                    viewport-width: locale_layout.min-width;
+                    height: 28px;
+                    locale_layout := HorizontalLayout {
+                        spacing: 6px; padding-top: 2px; padding-bottom: 2px;
+                        for pill in root.language_pills : FilterPill {
+                            text: pill.name; selected: pill.selected;
+                            clicked => { root.language_pill_clicked(pill.name); }
+                        }
+                    }
+                }
+            }
+
+            // Main Flattened Tree View List
+            Rectangle {
+                background: #13161c;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: #1e222b;
+
+                VerticalLayout {
+                    padding: 8px;
+
+                    // Table Header Column Labels
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 10px; height: 24px;
+                        Text { text: "name"; color: #4c566a; font-size: 11px; font-weight: 700; width: 75%; }
+                        Text { text: "size"; color: #4c566a; font-size: 11px; font-weight: 700; width: 25%; }
+                    }
+
+                    ScrollView {
+                        VerticalLayout {
+                            spacing: 2px;
+                            for row in root.explorer_rows : Rectangle {
+                                height: 32px; border-radius: 4px;
+                                background: row-ta-exp.has-hover ? #171a21 : transparent;
+
+                                row-ta-exp := TouchArea {}
+
+                                HorizontalLayout {
+                                    padding-left: 10px; padding-right: 10px;
+
+                                    // Primary File / Folder Name Column (Left-Indented dynamically based on depth)
+                                    HorizontalLayout {
+                                        width: 75%;
+                                        spacing: 6px;
+                                        padding-left: row.depth * 18px; // Creates visual recursive folders indent
+
+                                        // Expand/Collapse Arrow indicators
+                                        if row.is_dir : Rectangle {
+                                            width: 16px; height: 16px;
+                                            Text {
+                                                text: row.is_expanded ? "▼" : "▶";
+                                                font-size: 10px; color: #4c566a;
+                                                horizontal-alignment: center; vertical-alignment: center;
+                                            }
+                                            TouchArea {
+                                                clicked => { root.toggle_folder_expansion(row.id); }
+                                            }
+                                        }
+                                        if !row.is_dir : Rectangle {
+                                            width: 16px; height: 16px;
+                                            Text { text: "📄"; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                        }
+
+                                        // Checked Selector Box
+                                        Rectangle {
+                                            width: 16px; height: 16px;
+                                            CustomCheckBox {
+                                                checked: row.is_selected;
+                                                toggled(val) => { root.toggle_row_selection(row.id, val); }
+                                            }
+                                        }
+
+                                        // Folder / File Name
+                                        Text {
+                                            text: row.name; font-size: 13px;
+                                            color: row.is_dir ? #88c0d0 : #eceff4;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    // Size Label
+                                    Text {
+                                        text: row.is_dir ? "" : row.size_str;
+                                        font-size: 12px; color: #81a1c1;
+                                        vertical-alignment: center; width: 25%;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bottom Control Action Zone
+            HorizontalLayout {
+                spacing: 12px;
+                //vertical-alignment: center;
+
+                // Toggle Selection actions
+                HorizontalLayout {
+                    spacing: 8px;
+                    TactileButton {
+                        text: "Select All Visible"; width: 140px;
+                        clicked => { root.toggle_select_all(true); }
+                    }
+                    TactileButton {
+                        text: "Deselect All"; width: 140px;
+                        clicked => { root.toggle_select_all(false); }
+                    }
+                }
+
+                //Spacer {}
+
+                // Large action button
+                TactileButton {
+                    text: root.is_extracting ? "Extracting..." : "Extract Selected";
+                    primary: true; width: 180px;
+                    clicked => { if (!root.is_extracting) { root.extract_selected(); } }
+                }
+            }
+
+            // Extraction Live Progress Bar (Captured and piped from Tracing Layer)
+            if root.is_extracting : VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: root.extract_status;
+                    font-size: 11px; color: #8a94a6;
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Rectangle {
+                        background: #13161c; height: 6px; border-radius: 3px;
+                        Rectangle {
+                            background: #0ea5e9; height: 6px; border-radius: 3px;
+                            x: 0px; width: parent.width * root.extract_percent;
+                        }
+                    }
+                    Text {
+                        text: root.extract_speed + " | " + root.extract_eta;
+                        font-size: 11px; color: #8a94a6; width: 140px;
+                    }
+                }
+            }
+        }
+    }
+}
