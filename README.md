@@ -1,1 +1,3 @@
 toy project to see how far ai has come in terms of ui development...
+<img width="944" height="619" alt="image" src="https://github.com/user-attachments/assets/2625a08c-ddd3-42e6-b841-5b7d02190e17" />
+<img width="947" height="637" alt="image" src="https://github.com/user-attachments/assets/07df22a6-5ad9-41bc-a66c-a90d9aa11849" />
